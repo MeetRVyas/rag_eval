@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name            = "rag-eval"
+version         = "1.0.0"
+description     = "Rigorous LLM-as-judge evaluation engine for Research QA RAG systems"
+readme          = "README.md"
+requires-python = ">=3.10"
+license         = { text = "MIT" }
+
+dependencies = [
+    "anthropic>=0.40.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-mock>=3",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rag_eval*"]
