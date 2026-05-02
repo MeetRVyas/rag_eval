@@ -2,19 +2,19 @@
 examples.py — Usage examples for rag_eval.
 
 Run with:
-    ANTHROPIC_API_KEY=sk-... python examples.py
+    ANTHROPIC_API_KEY=sk-ant-...   python examples.py
+    GOOGLE_API_KEY=AIza...         python examples.py
+    GROQ_API_KEY=gsk_...           python examples.py
 """
 import json
 import os
 import sys
 
-# Allow running from the project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rag_eval import (
-    RAGEvaluator, EvalInput, MetricName,
-    AnswerRelevanceMetric, FaithfulnessMetric, CorrectnessMetric,
-    CompletenessMetric, HallucinationMetric,
+    RAGEvaluator, EvalInput, MetricName, list_models,
+    AnswerRelevanceMetric, FaithfulnessMetric, HallucinationMetric,
 )
 
 
@@ -38,169 +38,196 @@ REFERENCE = (
 )
 
 
-# ── Example 1: Single evaluation (full context + reference) ──────────────────
+# ── Example 0: List all available providers & models ─────────────────────────
 
-def example_single_full():
+def example_list_models():
     print("\n" + "="*60)
-    print("EXAMPLE 1 — Single evaluation (context + reference)")
+    print("EXAMPLE 0 — Available providers and models")
+    print("="*60)
+    list_models()
+
+
+# ── Example 1: Anthropic (default) ───────────────────────────────────────────
+
+def example_anthropic():
+    print("\n" + "="*60)
+    print("EXAMPLE 1 — Anthropic judge (default provider)")
     print("="*60)
 
-    evaluator = RAGEvaluator()
+    evaluator = RAGEvaluator()   # provider="anthropic", model="claude-sonnet-4-6"
+    print(f"\nJudge: {evaluator}")
 
     result = evaluator.evaluate(
         question  = "Why does transformer attention scale quadratically?",
         answer    = (
             "Transformer self-attention has O(n²) complexity because each of "
             "the n tokens must compute attention scores against all other n "
-            "tokens. This quadratic growth becomes a serious bottleneck for "
-            "long sequences. Sparse attention variants reduce this cost."
+            "tokens. Sparse attention variants reduce this cost."
         ),
         context   = CONTEXT,
         reference = REFERENCE,
-        metadata  = {"source": "gpt-4o", "version": "2025-01"},
     )
 
-    print(f"\nOverall score : {result.overall_score:.3f}")
-    print(f"Latency       : {result.latency_ms:.0f} ms")
-    print(f"Model         : {result.model}")
-    print("\nPer-metric breakdown:")
-    for m in result.metrics:
-        skipped = m.reasoning.startswith("Skipped")
-        status  = "–" if skipped else f"{m.score:.3f}"
-        print(f"  {m.name.value:<22} {status}")
-        if not skipped:
-            print(f"    ↳ {m.reasoning}")
-
+    _print_result(result)
     return result
 
 
-# ── Example 2: Evaluation without context/reference ──────────────────────────
+# ── Example 2: Google Gemini ──────────────────────────────────────────────────
 
-def example_single_minimal():
+def example_google():
     print("\n" + "="*60)
-    print("EXAMPLE 2 — Single evaluation (question + answer only)")
+    print("EXAMPLE 2 — Google Gemini judge")
     print("="*60)
 
-    evaluator = RAGEvaluator()
+    evaluator = RAGEvaluator(provider="google", model="gemini-2.5-flash")
+    print(f"\nJudge: {evaluator}")
 
     result = evaluator.evaluate(
-        question = "What is RLHF?",
-        answer   = (
+        question  = "What is RLHF?",
+        answer    = (
             "RLHF stands for Reinforcement Learning from Human Feedback. "
-            "It is a technique where a language model is fine-tuned using a "
-            "reward model trained on human preference data, allowing the model "
-            "to better align with human values and instructions."
+            "It fine-tunes a language model using a reward model trained on "
+            "human preference data, aligning the model with human values."
+        ),
+        reference = (
+            "RLHF is a technique that trains a reward model from human "
+            "preference labels and then fine-tunes the LLM with RL to "
+            "maximise that reward."
         ),
     )
 
-    print(f"\nOverall score : {result.overall_score:.3f}")
-    for m in result.metrics:
-        if not m.reasoning.startswith("Skipped"):
-            print(f"  {m.name.value:<22} {m.score:.3f}")
-
+    _print_result(result)
     return result
 
 
-# ── Example 3: Hallucination detection ───────────────────────────────────────
+# ── Example 3: Groq (fast inference) ─────────────────────────────────────────
 
-def example_hallucination():
+def example_groq():
     print("\n" + "="*60)
-    print("EXAMPLE 3 — Hallucination detection")
+    print("EXAMPLE 3 — Groq judge (fast inference)")
     print("="*60)
 
-    evaluator = RAGEvaluator()
+    evaluator = RAGEvaluator(
+        provider = "groq",
+        model    = "llama-3.3-70b-versatile",
+    )
+    print(f"\nJudge: {evaluator}")
 
-    # Deliberately inject a hallucinated statistic
     result = evaluator.evaluate(
         question = "What is the complexity of transformer self-attention?",
+        answer   = "It is O(n²) where n is the sequence length.",
+        context  = CONTEXT,
+    )
+
+    _print_result(result)
+    return result
+
+
+# ── Example 4: OpenAI ─────────────────────────────────────────────────────────
+
+def example_openai():
+    print("\n" + "="*60)
+    print("EXAMPLE 4 — OpenAI judge")
+    print("="*60)
+
+    evaluator = RAGEvaluator(provider="openai")  # gpt-5-2025-08-07 default
+    print(f"\nJudge: {evaluator}")
+
+    result = evaluator.evaluate(
+        question = "Who introduced the transformer architecture?",
         answer   = (
-            "Transformer self-attention has O(n²) complexity. Studies from "
-            "MIT in 2023 showed that on sequences over 100k tokens, attention "
-            "consumes 87.3% of GPU memory — a figure that has been validated "
-            "across 14 independent benchmarks."
+            'The transformer was introduced in "Attention Is All You Need" '
+            "by Vaswani et al. (2017) at NeurIPS."
         ),
         context  = CONTEXT,
     )
 
-    h = result.get(MetricName.HALLUCINATION)
-    f = result.get(MetricName.FAITHFULNESS)
-    print(f"\nHallucination score : {h.score:.3f}")
-    print(f"  ↳ {h.reasoning}")
-    print(f"\nFaithfulness score  : {f.score:.3f}")
-    print(f"  ↳ {f.reasoning}")
-
+    _print_result(result)
     return result
 
 
-# ── Example 4: Batch evaluation with custom metric subset ────────────────────
+# ── Example 5: Ollama (local) ─────────────────────────────────────────────────
 
-def example_batch():
+def example_ollama():
     print("\n" + "="*60)
-    print("EXAMPLE 4 — Batch evaluation with custom metrics")
+    print("EXAMPLE 5 — Ollama judge (local model, no API key)")
     print("="*60)
+    print("  Requires: `ollama serve` + `ollama pull llama3.2`")
 
-    # Only run the metrics we care about
     evaluator = RAGEvaluator(
-        metrics=[
-            AnswerRelevanceMetric(),
-            FaithfulnessMetric(),
-            HallucinationMetric(),
-        ],
-        weights={
-            MetricName.ANSWER_RELEVANCE: 0.4,
-            MetricName.FAITHFULNESS:     0.4,
-            MetricName.HALLUCINATION:    0.2,
-        },
-        max_workers=3,
+        provider = "ollama",
+        model    = "llama3.2",
+        # ollama_base_url = "http://localhost:11434",  # default
     )
+    print(f"\nJudge: {evaluator}")
+
+    result = evaluator.evaluate(
+        question = "What does O(n²) mean in transformer attention?",
+        answer   = (
+            "O(n²) means the computation grows quadratically with sequence "
+            "length n, so doubling n quadruples the cost."
+        ),
+        context  = CONTEXT,
+    )
+
+    _print_result(result)
+    return result
+
+
+# ── Example 6: Cross-provider batch comparison ────────────────────────────────
+
+def example_cross_provider_batch():
+    """
+    Evaluate the same inputs with two different providers and compare scores.
+    Useful for auditing judge consistency across models.
+    """
+    print("\n" + "="*60)
+    print("EXAMPLE 6 — Cross-provider comparison (Anthropic vs Groq)")
+    print("="*60)
 
     inputs = [
         EvalInput(
-            question  = "What is self-attention?",
-            answer    = "Self-attention lets each token attend to all others.",
-            context   = CONTEXT,
-            metadata  = {"id": "q1"},
+            question = "What is self-attention?",
+            answer   = "Self-attention lets each token attend to all others.",
+            context  = CONTEXT,
+            metadata = {"id": "q1"},
         ),
         EvalInput(
-            question  = "What is the complexity of self-attention?",
-            answer    = "It is O(n²) where n is the sequence length.",
-            context   = CONTEXT,
-            metadata  = {"id": "q2"},
-        ),
-        EvalInput(
-            question  = "Who invented the transformer?",
-            answer    = "The transformer was invented by Yann LeCun in 2015.",
-            context   = CONTEXT,
-            metadata  = {"id": "q3"},
+            question = "Who invented the transformer?",
+            answer   = "The transformer was invented by Yann LeCun in 2015.",  # wrong
+            context  = CONTEXT,
+            metadata = {"id": "q2"},
         ),
     ]
 
-    print("\nRunning batch evaluation...")
-    report = evaluator.evaluate_batch(inputs)
+    providers = [
+        ("anthropic", "claude-sonnet-4-6"),
+        ("groq",      "llama-3.3-70b-versatile"),
+    ]
 
-    print()
-    print(report.summary_table())
+    for prov, model in providers:
+        evaluator = RAGEvaluator(
+            provider    = prov,
+            model       = model,
+            metrics     = [AnswerRelevanceMetric(), FaithfulnessMetric(), HallucinationMetric()],
+            weights     = {MetricName.ANSWER_RELEVANCE: 0.4,
+                           MetricName.FAITHFULNESS:     0.4,
+                           MetricName.HALLUCINATION:    0.2},
+            max_workers = 2,
+        )
+        print(f"\n─── Provider: {prov} / {model} ───")
+        report = evaluator.evaluate_batch(inputs, show_progress=False)
+        print(report.summary_table())
 
-    # Export to JSON
-    out_path = "/tmp/eval_report.json"
-    with open(out_path, "w") as f:
-        json.dump(report.to_dict(), f, indent=2)
-    print(f"\nFull report saved → {out_path}")
 
-    return report
+# ── Example 7: Custom metric with provider choice ────────────────────────────
 
-
-# ── Example 5: Custom metric ──────────────────────────────────────────────────
-
-def example_custom_metric():
-    """
-    Shows how to write and plug in a custom metric.
-    """
+def example_custom_metric_with_provider():
     print("\n" + "="*60)
-    print("EXAMPLE 5 — Custom metric (Citation Quality)")
+    print("EXAMPLE 7 — Custom metric + Google Gemini")
     print("="*60)
 
-    from rag_eval import MetricName, MetricResult, LLMJudge, EvalInput
+    from rag_eval import MetricResult, BaseJudge, EvalInput
 
     _SYSTEM = """\
 You are an expert evaluator. Respond ONLY with valid JSON:
@@ -208,54 +235,90 @@ You are an expert evaluator. Respond ONLY with valid JSON:
 """
 
     class CitationQualityMetric:
-        """Does the answer cite its sources clearly and appropriately?"""
-        name = MetricName.CONCISENESS   # reuse an existing slot, or extend the enum
+        """Does the answer clearly cite its sources?"""
+        name = MetricName.CONCISENESS   # reuse an existing enum slot
 
-        def __call__(self, inp: EvalInput, judge: LLMJudge) -> MetricResult:
-            prompt = f"""\
-Evaluate the quality of citations in the ANSWER.
-
-QUESTION: {inp.question}
-ANSWER: {inp.answer}
-
-Criterion: Does the answer reference its sources (author, year, paper name)?
-Are citations accurate and relevant? Score 1.0 if well-cited, 0 if none.
-
-Respond with JSON only."""
+        def __call__(self, inp: EvalInput, judge: BaseJudge) -> MetricResult:
+            prompt = (
+                f"Does the ANSWER reference sources (author, year, paper)?\n\n"
+                f"QUESTION: {inp.question}\nANSWER: {inp.answer}\n\n"
+                "Score 1.0 if well-cited, 0 if none. Respond with JSON only."
+            )
             raw = judge.judge(_SYSTEM, prompt, ["score", "reasoning", "evidence"])
             return MetricResult(
                 name=self.name, score=max(0.0, min(1.0, float(raw["score"]))),
                 reasoning=raw["reasoning"], raw=raw,
             )
 
-    evaluator = RAGEvaluator(metrics=[CitationQualityMetric()])
+    evaluator = RAGEvaluator(
+        provider = "google",
+        model    = "gemini-2.5-flash",
+        metrics  = [CitationQualityMetric()],
+    )
 
     result = evaluator.evaluate(
-        question="What introduced the transformer architecture?",
-        answer=(
+        question = "What introduced the transformer architecture?",
+        answer   = (
             'The transformer architecture was introduced in "Attention Is All '
             'You Need" by Vaswani et al. (2017), published at NeurIPS.'
         ),
     )
 
     m = result.metrics[0]
-    print(f"\nCitation quality: {m.score:.3f}")
+    print(f"\nCitation quality ({evaluator.provider}/{evaluator.model}): {m.score:.3f}")
     print(f"  ↳ {m.reasoning}")
 
-    return result
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _print_result(result) -> None:
+    print(f"\n  Overall score : {result.overall_score:.3f}")
+    print(f"  Latency       : {result.latency_ms:.0f} ms")
+    print(f"  Per-metric:")
+    for m in result.metrics:
+        skipped = m.reasoning.startswith("Skipped")
+        status  = "  –  " if skipped else f"{m.score:.3f}"
+        print(f"    {m.name.value:<22} {status}")
+        if not skipped:
+            print(f"      ↳ {m.reasoning}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("ERROR: ANTHROPIC_API_KEY environment variable not set.")
-        sys.exit(1)
+    # Run examples based on which API keys are available
+    example_list_models()
 
-    example_single_full()
-    example_single_minimal()
-    example_hallucination()
-    example_batch()
-    example_custom_metric()
+    if os.getenv("ANTHROPIC_API_KEY"):
+        example_anthropic()
+    else:
+        print("\n⚠  ANTHROPIC_API_KEY not set — skipping Anthropic examples.")
 
-    print("\n✓ All examples completed.")
+    if os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"):
+        example_google()
+        example_custom_metric_with_provider()
+    else:
+        print("\n⚠  GOOGLE_API_KEY not set — skipping Google examples.")
+
+    if os.getenv("OPENAI_API_KEY"):
+        example_openai()
+    else:
+        print("\n⚠  OPENAI_API_KEY not set — skipping OpenAI examples.")
+
+    if os.getenv("GROQ_API_KEY"):
+        example_groq()
+    else:
+        print("\n⚠  GROQ_API_KEY not set — skipping Groq examples.")
+
+    # Ollama: only run if server appears reachable
+    try:
+        import urllib.request
+        urllib.request.urlopen("http://localhost:11434", timeout=1)
+        example_ollama()
+    except Exception:
+        print("\n⚠  Ollama not reachable at localhost:11434 — skipping.")
+
+    if os.getenv("ANTHROPIC_API_KEY") and os.getenv("GROQ_API_KEY"):
+        example_cross_provider_batch()
+
+    print("\n✓ Done.")

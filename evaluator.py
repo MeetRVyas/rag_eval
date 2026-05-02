@@ -1,20 +1,36 @@
 """
 RAGEvaluator — the main entry point for the evaluation engine.
 
+Supports multiple LLM providers as judge:  anthropic (default), google,
+openai, groq, ollama.
+
 Usage
 -----
 from rag_eval import RAGEvaluator, EvalInput
 
-evaluator = RAGEvaluator()                    # uses env var ANTHROPIC_API_KEY
-evaluator = RAGEvaluator(api_key="sk-...")    # explicit key
-evaluator = RAGEvaluator(model="claude-opus-4-20250514")
+# Anthropic (original behaviour — unchanged)
+evaluator = RAGEvaluator()
+evaluator = RAGEvaluator(provider="anthropic", model="claude-opus-4-6")
+
+# Google Gemini
+evaluator = RAGEvaluator(provider="google", model="gemini-2.5-pro")
+
+# OpenAI
+evaluator = RAGEvaluator(provider="openai")
+
+# Groq (fast inference)
+evaluator = RAGEvaluator(provider="groq", model="llama-3.3-70b-versatile")
+
+# Ollama (local)
+evaluator = RAGEvaluator(provider="ollama", model="llama3.2")
+evaluator = RAGEvaluator(provider="ollama", ollama_base_url="http://192.168.1.10:11434")
 
 # Single evaluation
 result = evaluator.evaluate(
     question = "What causes transformer attention to scale quadratically?",
     answer   = "...",
-    context  = "...",          # optional – enables faithfulness & hallucination
-    reference= "...",          # optional – enables correctness
+    context  = "...",    # optional — enables faithfulness & hallucination
+    reference= "...",    # optional — enables correctness
 )
 
 # Batch evaluation
@@ -30,7 +46,8 @@ from typing import Optional
 from .schemas import (
     EvalInput, EvalResult, EvalReport, MetricName, MetricResult
 )
-from .judge import LLMJudge
+from .providers import create_judge, Provider
+from .providers.base import BaseJudge
 from .metrics import (
     ALL_METRICS,
     AnswerRelevanceMetric, FaithfulnessMetric, CorrectnessMetric,
@@ -53,31 +70,50 @@ class RAGEvaluator:
 
     Parameters
     ----------
-    model       : Judge model (default: claude-sonnet-4-20250514)
-    api_key     : Anthropic API key (falls back to ANTHROPIC_API_KEY env var)
-    temperature : Judge temperature. 0 = deterministic.
-    metrics     : List of metric instances to use. Defaults to ALL_METRICS.
-    weights     : Dict[MetricName, float] custom weights for overall score.
-                  Skipped metrics are excluded from the weighted mean.
-    max_workers : Thread pool size for parallel batch evaluation.
+    provider        : LLM provider to use as judge.
+                      One of: "anthropic" (default), "google", "openai",
+                      "groq", "ollama"  — or the Provider enum.
+    model           : Model identifier for the chosen provider.
+                      Omit to use each provider's recommended default.
+    api_key         : Provider API key. Falls back to the standard env-var
+                      for each provider when not supplied:
+                        anthropic → ANTHROPIC_API_KEY
+                        google    → GOOGLE_API_KEY  (or GEMINI_API_KEY)
+                        openai    → OPENAI_API_KEY
+                        groq      → GROQ_API_KEY
+                        ollama    → (no key required)
+    temperature     : Judge temperature. 0 = deterministic judgments.
+    metrics         : List of metric instances. Defaults to ALL_METRICS.
+    weights         : Dict[MetricName, float] custom weights for overall score.
+                      Skipped metrics are excluded from the weighted mean.
+    max_workers     : Thread pool size for parallel batch evaluation.
+    ollama_base_url : Ollama server URL (only used when provider="ollama").
+                      Default: "http://localhost:11434"
     """
 
     def __init__(
         self,
-        model:       str = "claude-sonnet-4-20250514",
-        api_key:     Optional[str] = None,
-        temperature: float = 0.0,
-        metrics:     Optional[list] = None,
-        weights:     Optional[dict[MetricName, float]] = None,
-        max_workers: int = 4,
+        provider:        str | Provider = Provider.ANTHROPIC,
+        model:           Optional[str] = None,
+        api_key:         Optional[str] = None,
+        temperature:     float = 0.0,
+        metrics:         Optional[list] = None,
+        weights:         Optional[dict[MetricName, float]] = None,
+        max_workers:     int = 4,
+        ollama_base_url: str = "http://localhost:11434",
     ) -> None:
-        self._judge      = LLMJudge(model=model, api_key=api_key,
-                                    temperature=temperature)
-        self._metrics    = metrics if metrics is not None else ALL_METRICS
-        self._weights    = weights if weights is not None else _DEFAULT_WEIGHTS
+        self._judge = create_judge(
+            provider        = provider,
+            model           = model,
+            api_key         = api_key,
+            temperature     = temperature,
+            ollama_base_url = ollama_base_url,
+        )
+        self._metrics     = metrics if metrics is not None else ALL_METRICS
+        self._weights     = weights if weights is not None else _DEFAULT_WEIGHTS
         self._max_workers = max_workers
 
-    # ── Public API ───────────────────────────────────────────────────────────
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def evaluate(
         self,
@@ -107,7 +143,7 @@ class RAGEvaluator:
 
     def evaluate_batch(
         self,
-        inputs: list[EvalInput],
+        inputs:        list[EvalInput],
         show_progress: bool = True,
     ) -> EvalReport:
         """
@@ -116,7 +152,7 @@ class RAGEvaluator:
         Returns an EvalReport with per-result details and aggregate statistics.
         """
         results: list[EvalResult] = []
-        total = len(inputs)
+        total   = len(inputs)
 
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self._max_workers
@@ -131,18 +167,22 @@ class RAGEvaluator:
                     results.append(result)
                     if show_progress:
                         done = len(results)
-                        print(f"  [{done}/{total}] overall={result.overall_score:.3f} "
-                              f"| {inputs[idx].question[:60]}...")
+                        print(
+                            f"  [{done}/{total}] "
+                            f"overall={result.overall_score:.3f} "
+                            f"| {inputs[idx].question[:60]}..."
+                        )
                 except Exception as exc:
                     print(f"  [ERROR] sample {idx}: {exc}")
 
-        # Sort back into original order
+        # Sort back into original submission order
         order = {id(inp): i for i, inp in enumerate(inputs)}
         results.sort(key=lambda r: order.get(id(r.input), 0))
 
         return EvalReport(
             results=results,
             config={
+                "provider":    self._judge.provider,
                 "model":       self._judge.model,
                 "temperature": self._judge.temperature,
                 "metrics":     [m.name.value for m in self._metrics],
@@ -150,11 +190,26 @@ class RAGEvaluator:
             },
         )
 
-    # ── Internal ─────────────────────────────────────────────────────────────
+    # ── Properties ────────────────────────────────────────────────────────────
+
+    @property
+    def judge(self) -> BaseJudge:
+        """The underlying judge instance (useful for custom metrics)."""
+        return self._judge
+
+    @property
+    def provider(self) -> str:
+        return self._judge.provider
+
+    @property
+    def model(self) -> str:
+        return self._judge.model
+
+    # ── Internal ──────────────────────────────────────────────────────────────
 
     def _run(self, inp: EvalInput) -> EvalResult:
-        t0 = time.perf_counter()
-        metric_results: list[MetricResult] = []
+        t0             = time.perf_counter()
+        metric_results = []
 
         for metric in self._metrics:
             result = metric(inp, self._judge)
@@ -173,8 +228,8 @@ class RAGEvaluator:
 
     def _weighted_mean(self, results: list[MetricResult]) -> float:
         """
-        Compute a weighted mean, skipping metrics that were not run
-        (score=0 with a 'Skipped' reasoning).
+        Compute a weighted mean, excluding any metric that was skipped
+        (those have reasoning starting with "Skipped").
         """
         total_weight = 0.0
         total_score  = 0.0
@@ -182,10 +237,14 @@ class RAGEvaluator:
         for r in results:
             if r.reasoning.startswith("Skipped"):
                 continue
-            w = self._weights.get(r.name, 1.0)
+            w             = self._weights.get(r.name, 1.0)
             total_score  += r.score * w
             total_weight += w
 
-        if total_weight == 0:
-            return 0.0
-        return total_score / total_weight
+        return 0.0 if total_weight == 0 else total_score / total_weight
+
+    def __repr__(self) -> str:
+        return (
+            f"RAGEvaluator(provider={self.provider!r}, model={self.model!r}, "
+            f"metrics={len(self._metrics)}, max_workers={self._max_workers})"
+        )

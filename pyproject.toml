@@ -1,25 +1,39 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires      = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name            = "rag-eval"
-version         = "1.0.0"
-description     = "Rigorous LLM-as-judge evaluation engine for Research QA RAG systems"
+version         = "2.0.0"
+description     = "Rigorous LLM-as-judge evaluation engine for Research QA RAG systems — multi-provider"
 readme          = "README.md"
 requires-python = ">=3.10"
 license         = { text = "MIT" }
 
-dependencies = [
-    "anthropic>=0.40.0",
-]
+# No hard dependencies — install only what you need via extras
+dependencies = []
 
 [project.optional-dependencies]
+# Individual providers
+anthropic = ["anthropic>=0.40.0"]
+google    = ["google-genai>=1.0.0"]
+openai    = ["openai>=1.50.0"]
+groq      = ["openai>=1.50.0"]       # Groq uses the openai SDK with a custom base_url
+ollama    = ["openai>=1.50.0"]       # Ollama also uses the openai SDK
+
+# Convenience bundles
+all = [
+    "anthropic>=0.40.0",
+    "google-genai>=1.0.0",
+    "openai>=1.50.0",
+]
+
 dev = [
+    "anthropic>=0.40.0",   # needed to run the test suite
     "pytest>=8",
     "pytest-mock>=3",
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
 include = ["rag_eval*"]
